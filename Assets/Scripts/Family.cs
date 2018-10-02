@@ -10,7 +10,14 @@ public class Family : MonoBehaviour{
     public float rationsPerMember = 0;
     public int rationsStoleOverTime = 0;
 
+    public int totalRationsThisYear = 0;
+    public int totalRationsAllTime = 0;
+
     public int overallFamilyHealth = 100; // Percent
+
+    public bool dead = false;
+
+    public int yearOfDeath = 0;
 
     public void CalculateRationsPerMember()
     {
@@ -18,6 +25,9 @@ public class Family : MonoBehaviour{
         if(rationsPerMember < 0.7)
         {
             overallFamilyHealth -= 10;
+            if(overallFamilyHealth <= 0){
+                dead = true;
+            }
         }
     }
     public void CalculateNourishment()

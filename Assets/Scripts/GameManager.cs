@@ -6,13 +6,17 @@ using Sirenix.OdinInspector;
 
 public class GameManager : MonoBehaviour {
 
-    private enum RationsInteractionState { IDLE, TAKE, CONSUMESTORE}
+    private enum RationsInteractionState { IDLE, TAKE, CONSUMESTORE, OVER}
     private RationsInteractionState rationsInteractionState = RationsInteractionState.IDLE;
 
     [FoldoutGroup("Game Manager")]
     public int lengthOfFamine = 10; // Years
     [FoldoutGroup("Game Manager")]
     public int daysInYear = 3; // There are x number of days in a year
+    [FoldoutGroup("Game Manager")]
+    public int rationReplinishPercentMin = 30;
+    [FoldoutGroup("Game Manager")]
+    public int rationsReplinishPercentMax = 90;
 
     [FoldoutGroup("Time Of Year")]
     public int day = 1;
@@ -70,6 +74,18 @@ public class GameManager : MonoBehaviour {
     [FoldoutGroup("UI - Government Information")]
     public Text stolenRationsTotalLabel;
 
+    [FoldoutGroup("UI - Year Info")]
+    public Text yearLabel;
+    [FoldoutGroup("UI - Year Info")]
+    public Text dayLabel;
+    [FoldoutGroup("UI - Year Info")]
+    public Text rationLengthLabel;
+
+    [FoldoutGroup("UI - Notification")]
+    public GameObject notificationPrefab;
+    [FoldoutGroup("UI - Notification")]
+    public GameObject notificationParent;
+
 
     private System.Random random = new System.Random();
 
@@ -91,6 +107,13 @@ public class GameManager : MonoBehaviour {
         consumeInputField.interactable = false;
         storeInputField.interactable = false;
         consumeStoreButton.interactable = false;
+        // Calculate number of rations
+        int _rations = 0;
+        foreach(Family f in families){
+            _rations += f.numberOfFamilyMembers;
+        }
+        _rations += 225;
+        government.availableRations = _rations;
     }
 	
 	// Update is called once per frame
@@ -169,54 +192,76 @@ public class GameManager : MonoBehaviour {
             }
             else
             {
-                Debug.LogError("You do not have that much in your store!");
+                InstantiateNotification("You do not have that much in your store!");
             }
             // Set consume from store input to empty
             consumeFromStoreInputField.text = string.Empty;
         }
         else
         {
-            Debug.LogError("If you want to consume from store, you need to add a number you want to take!");
+            InstantiateNotification("If you want to consume from store, you need to add a number you want to take!");
         }
     }
 
     private void PlayerTakeRations()
     {
-        int _availableRations = government.availableRations;
-        if(takeInputField.text != string.Empty || takeInputField.text != "")
-        {
-            int _take = Convert.ToInt32(takeInputField.text);
-            if(_take > _availableRations)
+        if(playerAssignedFamily.overallFamilyHealth <= 0){
+            if(playerAssignedFamily.yearOfDeath != 0){
+                playerAssignedFamily.yearOfDeath = year;
+            }
+            InstantiateNotification("You are dead. Restart the game.");
+        }
+        else{
+            int _availableRations = government.availableRations;
+            if(takeInputField.text != string.Empty || takeInputField.text != "")
             {
-                takeInputField.text = string.Empty;
-                Debug.LogError("You cannot take more than the supply!");
+                int _take = Convert.ToInt32(takeInputField.text);
+                if(_take > _availableRations)
+                {
+
+                    playerAssignedFamily.currentRations = 0;
+                    playerAssignedFamily.consumeRations = 0;
+                    playerAssignedFamily.storedRations = 0;
+                    playerAssignedFamily.CalculateRationsPerMember();
+                    if(playerAssignedFamily.overallFamilyHealth < 0.5f){
+                        government.numberOfFamilies++;
+                    }
+                    InstantiateNotification(playerAssignedFamily.familyName + "You have tried to take everything! You will be punished with no rations!");
+                }
+                else
+                {
+                    if(_take > government.allowedRationsPerFamily || _take > playerAssignedFamily.numberOfFamilyMembers)
+                    {
+                        int _stolenRations = 0; 
+                        if(_take > government.allowedRationsPerFamily)
+                        {
+                            _stolenRations = _take - government.allowedRationsPerFamily;
+                            InstantiateNotification("Take bigger than government allowed");
+                        } 
+                        else if(_take > playerAssignedFamily.numberOfFamilyMembers)
+                        {
+                            _stolenRations = _take - playerAssignedFamily.numberOfFamilyMembers;
+                            //InstantiateNotification("Take bigger than number of members");
+                        }
+                        playerAssignedFamily.rationsStoleOverTime = _stolenRations;
+                        government.stolenRations += _stolenRations;
+                        InstantiateNotification("You've stolen " + _stolenRations + " ration(s)!");
+                    }
+                    playerAssignedFamily.currentRations = _take;
+                    playerAssignedFamily.totalRationsThisYear += _take;
+                    playerAssignedFamily.totalRationsAllTime += _take;
+                    // Decress from government
+                    government.availableRations -= _take;
+                    // Set take input to empty
+                    takeInputField.text = string.Empty;
+                    // Change ration interaction state
+                    rationsInteractionState = RationsInteractionState.CONSUMESTORE;
+                }
             }
             else
             {
-                if(_take > government.allowedRationsPerFamily || _take > playerAssignedFamily.numberOfFamilyMembers)
-                {
-                    int _stolenRations = 0; 
-                    if(_take > government.allowedRationsPerFamily)
-                    {
-                        _stolenRations = _take - government.allowedRationsPerFamily;
-                    } else if(_take > playerAssignedFamily.numberOfFamilyMembers)
-                    {
-                        _stolenRations = _take - playerAssignedFamily.numberOfFamilyMembers;
-                    }
-                    playerAssignedFamily.rationsStoleOverTime = _stolenRations;
-                    government.stolenRations += _stolenRations;
-                    Debug.Log("You've stolen " + _stolenRations + " ration(s)!");
-                }
-                playerAssignedFamily.currentRations = _take;
-                // Set take input to empty
-                takeInputField.text = string.Empty;
-                // Change ration interaction state
-                rationsInteractionState = RationsInteractionState.CONSUMESTORE;
+                InstantiateNotification("You need to take your rations!");
             }
-        }
-        else
-        {
-            Debug.LogError("You need to take your rations!");
         }
     }
 
@@ -225,11 +270,11 @@ public class GameManager : MonoBehaviour {
         int _currentRations = playerAssignedFamily.currentRations;
         if(consumeInputField.text == string.Empty && storeInputField.text == string.Empty)
         {
-            Debug.LogError("You need to enter your 'Consume' and 'Store' rations!");
+            InstantiateNotification("You need to enter your 'Consume' and 'Store' rations!");
         }
         else if((consumeInputField.text != string.Empty && storeInputField.text == string.Empty) || (consumeInputField.text == string.Empty && storeInputField.text != string.Empty))
         {
-            Debug.LogError("You need to enter a number for both consume and store!");
+            InstantiateNotification("You need to enter a number for both consume and store!");
         }
         else
         {
@@ -238,7 +283,7 @@ public class GameManager : MonoBehaviour {
             int _totalAmount = _consumeAmount + _storeAmount;
             if((_totalAmount > _currentRations) || (_totalAmount < _currentRations))
             {
-                Debug.LogError("Your numbers don't add up to you current take!");
+                InstantiateNotification("Your numbers don't add up to you current take!");
             }
             else
             {
@@ -254,15 +299,118 @@ public class GameManager : MonoBehaviour {
                 // Change ration interaction state
                 rationsInteractionState = RationsInteractionState.IDLE;
                 // Tell computer to choose for rest of families
-                ComputerTakeRations();
+                ComputerTakeConsumeStoreRations();
             }
         }
     }
 
-    private void ComputerTakeRations()
+    private void ComputerTakeConsumeStoreRations()
     {
-        Debug.Log("Computer has chosen...");
+        // Dead families
+        int _deadFamilies = 0;
+        // Starving Families
+        int _starvingFamilies = 0;
+        // Get each family in families
+        foreach(Family _family in families){
+            if(!_family.dead && _family){
+                if(_family != playerAssignedFamily){
+                    // Choose take
+                    int _take = 0;
+                    if(_family.numberOfFamilyMembers <= government.allowedRationsPerFamily){
+                        _take = _family.numberOfFamilyMembers;
+                    }
+                    else if(_family.numberOfFamilyMembers > government.allowedRationsPerFamily){
+                        _take = government.allowedRationsPerFamily;
+                    }
+                    // Get take and stolen rations from government
+                        if(government.stolenRations > 4){
+                            _take += random.Next(0, _family.numberOfFamilyMembers - 2);
+                        }
+                    // See if take is allowed
+                    if(_take < government.availableRations){
+                        _family.currentRations = _take;
+                        // Decide what to consume and what to store
+                        if(_family.currentRations == _family.numberOfFamilyMembers || _family.currentRations < _family.numberOfFamilyMembers){
+                            // Consume rations
+                            _family.consumeRations = _family.currentRations;
+                            _family.CalculateRationsPerMember();
+                        }
+                        else if(_family.currentRations > _family.numberOfFamilyMembers){
+                            _family.consumeRations = _family.currentRations - _family.numberOfFamilyMembers;
+                            _family.storedRations = _family.currentRations - _family.consumeRations;
+                            _family.CalculateRationsPerMember();
+                        }
+                        government.availableRations -= _take;
+                    } 
+                    else if(_take / 2 < government.availableRations){
+                        _family.currentRations = _take;
+                        // Decide what to consume and what to store
+                        if(_family.currentRations == _family.numberOfFamilyMembers || _family.currentRations < _family.numberOfFamilyMembers){
+                            // Consume rations
+                            _family.consumeRations = _family.currentRations;
+                            _family.CalculateRationsPerMember();
+                        }
+                        else if(_family.currentRations > _family.numberOfFamilyMembers){
+                            _family.consumeRations = _family.currentRations - _family.numberOfFamilyMembers;
+                            _family.storedRations = _family.currentRations - _family.consumeRations;
+                            _family.CalculateRationsPerMember();
+                        }
+                        government.availableRations -= _take;
+                    }
+                    else if(_take > government.availableRations){
+                        _family.currentRations = 0;
+                        _family.consumeRations = 0;
+                        _family.storedRations = 0;
+                        _family.CalculateRationsPerMember();
+                        if(_family.overallFamilyHealth < 0.5f){
+                            _starvingFamilies++;
+                        }
+                        InstantiateNotification(_family.familyName + " has tried to take everything! They will be punished with no rations!");
+                    }
+                } 
+            }
+            else{
+                _deadFamilies++;
+            }
+        }
+        // Tell government Starving families
+        government.numberOfStarvingFamilies = _starvingFamilies;
+        // Tell government there is a dead family
+        government.numberOfDeadFamilies = _deadFamilies;
+        InstantiateNotification("The day is over. Please choose your next days rations...");
+        // End computer turn and set time of year and replinish rations if needed
+        SetTimeOfGame();
         rationsInteractionState = RationsInteractionState.TAKE;
+    }
+
+    private void SetTimeOfGame (){
+        int _day = this.day;
+        int _year = this.year;
+        
+        if(_day < this.daysInYear){
+            day++;
+        }
+        else if(_day == daysInYear && _year < this.lengthOfFamine){
+            year++;
+            day = 1;
+            // Tell player how much theyve taken
+            InstantiateNotification("You have taken " + playerAssignedFamily.totalRationsThisYear + " this year and " + playerAssignedFamily.totalRationsAllTime + " since the start of the famine!");
+            // Set player assigned rations for year to 0
+            playerAssignedFamily.totalRationsThisYear = 0;
+            // Replinish government
+            float _replinish = government.startAvailableRations * ((float)random.Next(rationReplinishPercentMin, rationsReplinishPercentMax) / 100);
+            government.availableRations += Convert.ToInt32(_replinish);
+            InstantiateNotification("Government was replinished with " + Convert.ToInt32(_replinish) + " rations!");
+        }
+        else if (_day == daysInYear && _year >= this.lengthOfFamine){
+            rationsInteractionState = RationsInteractionState.OVER;
+            if(playerAssignedFamily.yearOfDeath > 0){
+                InstantiateNotification("The famine is over. You died in year " + playerAssignedFamily.yearOfDeath);
+            }
+            else{
+                InstantiateNotification("You survived the famine along with " + (government.numberOfFamilies - government.numberOfDeadFamilies) + " other families!");
+            }
+        }
     }
 
     private void UpdateUI()
@@ -310,6 +458,17 @@ public class GameManager : MonoBehaviour {
                     consumeFromStoreButton.interactable = false;
                 }
                 break;
+            case RationsInteractionState.OVER:
+                // Set take UI interactable false
+                takeInputField.interactable = false;
+                takeButton.interactable = false;
+                // Set consume/store interactable true
+                consumeInputField.interactable = true;
+                storeInputField.interactable = true;
+                consumeStoreButton.interactable = true;
+                consumeFromStoreInputField.interactable = false;
+                consumeFromStoreButton.interactable = false;
+            break;
         }
         // Family title
         familyTitleLabel.text = "Family: " + playerAssignedFamily.familyName;
@@ -327,5 +486,12 @@ public class GameManager : MonoBehaviour {
         familiesAtStartLabel.text = "Families At Start: " + government.numberOfFamilies.ToString();
         starvingFamiliesLabel.text = "Starving Families: " + government.numberOfStarvingFamilies.ToString();
         stolenRationsTotalLabel.text = "Reported Stolen Rations: " + government.stolenRations.ToString();
+        yearLabel.text = "Year: " + year.ToString();
+        dayLabel.text = "Day: " + day.ToString();
+    }
+
+    public void InstantiateNotification(string _text){
+        GameObject go = Instantiate(notificationPrefab,notificationParent.transform);
+        go.GetComponent<Notification>().SetText(_text);
     }
 }
